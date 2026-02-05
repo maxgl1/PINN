@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 from scipy.stats import qmc
 import numpy as np
-from main import HeatPINN, Domain
+from heat import HeatPINN, Domain
 
 
 class Physics:
@@ -173,7 +173,7 @@ def plot_list(list, name):
     plt.show()
 if __name__ == '__main__':
     torch.manual_seed(3)
-    
+
     #train
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Calculs effectués sur : {device}")

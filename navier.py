@@ -5,7 +5,7 @@ from matplotlib.widgets import Slider
 from scipy.stats import qmc
 import numpy as np
 
-class HeatPINN(nn.Module):# on fait hérier de nn.Module pour que pytorch gère ensuite seul et sache entre autre quel poids mettre à jour, tout les parametres du modèle seront dans self.parameters()
+class NavierPINN(nn.Module):# on fait hérier de nn.Module pour que pytorch gère ensuite seul et sache entre autre quel poids mettre à jour, tout les parametres du modèle seront dans self.parameters()
     def __init__(self):
         super().__init__()# on initialise la classe parente
         self.net = nn.ModuleList([nn.Linear(3, 50)]+[nn.Linear(50, 50) for _ in range(8)]+[nn.Linear(50, 3)]) # on définit juste des blocs qu'on pourra utiliser ou non (différent de sequential qui fait lui meme les enchainements)
@@ -29,7 +29,7 @@ class HeatPINN(nn.Module):# on fait hérier de nn.Module pour que pytorch gère 
                 nn.init.constant_(m.bias, 0)
 
 class Domain:
-    def __init__(self,n=500, x_min=0, x_max=1, y_min=0, y_max=1, z_min=0, z_max=1, t_min=0, t_max=1):
+    def __init__(self,n=40000, x_min=0, x_max=1, y_min=0, y_max=1, z_min=0, z_max=1, t_min=0, t_max=1):
         self.n = n
 
         self.x_min = x_min
@@ -53,36 +53,26 @@ class Domain:
         self.t = real_points_torch[:, 2].reshape(-1, 1)# de taille (N, )
         return self.x, self.y, self.t
     
-    def generate_border(self):
-        x_collocation = torch.linspace(self.x_min, self.x_max, self.n//2, device=device)
-        y_collocation = torch.linspace(self.y_min, self.y_max, self.n//2, device=device)
-        t_collocation = torch.linspace(self.t_min, self.t_max, self.n, device=device)
+    def generate_border(self, n_bord=100):
+        t_rand = torch.rand(n_bord, 1) * self.t_max# loi uniforme, on multiplie par la bonne valeur pour obtenir le bon interval
+        y_rand = torch.rand(n_bord, 1) * (self.y_max - self.y_min) + self.y_min # pareil pour que ca commence a y_min
+        x_rand = torch.rand(n_bord, 1) * (self.x_max - self.x_min) + self.x_min # pour que ca commence a x_min
         self.bordure = {}
 
-        # a gauche (inlet):
-        Y, T = torch.meshgrid(y_collocation, t_collocation, indexing='ij')
-        X = torch.zeros_like(Y) 
-        x_inlet = X.flatten().view(-1, 1)# view casi pareil que reshape mais créé pas de copie
-        y_inlet = Y.flatten().view(-1, 1)
-        t_inlet = T.flatten().view(-1, 1)
-        self.bordure['g'] = [x_inlet, y_inlet, t_inlet]
+        # GAUCHE (Inlet) : x=0, y=aléatoire, t=aléatoire
+        self.bordure['g'] = [torch.full((n_bord, 1), self.x_min), y_rand, t_rand] #.full(size, value) : créeé n_bord point a la valeur self.x_min
 
-        # droite (pareil mais x=1)
-        x_outlet = torch.ones_like(x_inlet)
-
-        self.bordure['d'] = [x_outlet, y_inlet, t_inlet]
+        # DROITE (Outlet) : x=1, y=aléatoire, t=aléatoire
+        self.bordure['d'] = [torch.full((n_bord, 1), self.x_max), y_rand, t_rand]
         
-        #en haut
-        X, T = torch.meshgrid(x_collocation, t_collocation, indexing='ij')
-        Y = torch.ones_like(X)
-        x_haut = X.flatten().view(-1, 1)# view casi pareil que reshape mais créé pas de copie
-        y_haut = Y.flatten().view(-1, 1)
-        t_haut = T.flatten().view(-1, 1)
-        self.bordure['h'] = [x_haut, y_haut, t_haut]
+        # HAUT : x=aléatoire, y=1, t=aléatoire
+        self.bordure['h'] = [x_rand, torch.full((n_bord, 1), self.y_max), t_rand]
 
-        # en bas
-        y_bas = torch.zeros_like(y_haut)
-        self.bordure['b'] = [x_haut, y_bas, t_haut]
+        # BAS : x=aléatoire, y=0, t=aléatoire
+        self.bordure['b'] = [x_rand, torch.full((n_bord, 1), self.y_min), t_rand]
+
+        for k in self.bordure:
+            self.bordure[k] = [v.to(device) for v in self.bordure[k]]
         return self.bordure
 
     def create_grid_testing(self):
@@ -167,32 +157,31 @@ class Physics:
         mse = nn.MSELoss()
         s = torch.tensor(0.0, device=device)
         for k, val in bordure.items():
-            if k=='g':
+            if k=='g': #CL : u=1, v=0
                 u, v, p = torch.split(model(val[0], val[1], val[2]), 1, dim=1)
                 u_g = torch.ones_like(u)
                 v_g = torch.zeros_like(v)
                 s+=mse(v, v_g)
                 s+=mse(u, u_g)
-            if k=='b':
+            if k=='b':# CL : v=0
                 u, v, p = torch.split(model(val[0], val[1], val[2]), 1, dim=1)
                 v_b = torch.zeros_like(v)
                 s+=mse(v, v_b)
-            if k=='h':
+            if k=='h':# CL : v=0
                 u, v, p = torch.split(model(val[0], val[1], val[2]), 1, dim=1)
                 v_h = torch.zeros_like(v)
                 s+=mse(v_h, v)
-            if k=='d':
+            if k=='d': #CL : p=0 
                 u, v, p = torch.split(model(val[0], val[1], val[2]), 1, dim=1)
                 p_d = torch.zeros_like(u)
                 s+=mse(p, p_d)
         return s 
     
-    def compute_cycl_loss(self, model, x_cyl, y_cyl, t):#condition de vitesse nulle à la surface du cylindre
-        t_squeezed = t.squeeze() # pour pouvoir faire le meshgrid, il faut une taille (N,) alors que t est (N, 1)
+    def compute_cycl_loss(self, model, x_cyl, y_cyl, t_collocation):#condition de vitesse nulle à la surface du cylindre
+        idx = torch.randint(0, t_collocation.shape[0], (x_cyl.shape[0],), device=device) # on pourrait penser que c'est nul car maintenant chaque point a un temps précis, mais celui ci change a chaque époque et donc est nul a plein de temps différent
+        t_rand = t_collocation[idx]# on récupère que ceux tirer dans l'étape d'avant
 
-        x_t , t_t= torch.meshgrid(x_cyl, t_squeezed, indexing='ij')# on génere les x_t à tous les temps
-        y_t, t_t = torch.meshgrid(y_cyl, t_squeezed, indexing='ij')
-        x_t, y_t, t_t  = x_t.reshape(-1, 1), y_t.reshape(-1, 1), t_t.reshape(-1, 1)
+        x_t, y_t, t_t  = x_cyl.reshape(-1, 1), y_cyl.reshape(-1, 1), t_rand.reshape(-1, 1)
 
         u, v, p = torch.split(model(x_t, y_t, t_t), 1, dim=1)
 
@@ -202,12 +191,13 @@ class Physics:
 
         return mse_ucyl + mse_vcyl
 
-    def compute_total_loss(self, model, x, y, t, bordure, x_cyl, y_cyl, a=1, b=1, c=1):
+    def compute_total_loss(self, model, x, y, t, bordure, x_cyl, y_cyl, t_col, a=1, b=1, c=1):
         pde_x, pde_y, pde_cont = self.compute_pde_residual(model, x, y, t)
         ic = self.compute_initial_condition(model, x, y, t)
         bl = self.compute_boundary_loss(model, bordure)
-        cyl = self.compute_cycl_loss(model, x_cyl, y_cyl, t)
-        return 1*(pde_x + pde_y + pde_cont) + 10*ic + 10*bl + 10*cyl
+        cyl = self.compute_cycl_loss(model, x_cyl, y_cyl, t_col)
+
+        return 1*(pde_x + pde_y + pde_cont) + 10*ic + 50*bl + 50*cyl
 
 class Solver:
     def __init__(self, model, domain, physics):
@@ -217,29 +207,62 @@ class Solver:
         self.domain = domain
         domain.sample_2D_training()# permet de definir ce qu'il y a besoin dans domain pour la suite
 
-        x, y, t = domain.exclude_collocation_cylinder(torch.tensor(0.5), torch.tensor(0.5), torch.tensor(0.2))
-        self.x, self.y, self.t = x.to(device), y.to(device), t.to(device)# on travaille sur le gpu (mps)
+        x, y, t = domain.exclude_collocation_cylinder(torch.tensor(0.5), torch.tensor(0.5), torch.tensor(0.1))
+        self.x, self.y, self.t = x.to(device), y.to(device), t.to(device)# on travaille sur le gpu (mps) 
 
-        x_cyl, y_cyl = domain.generate_no_slip(torch.tensor(0.5), torch.tensor(0.5), torch.tensor(0.2))
+        x_cyl, y_cyl = domain.generate_no_slip(torch.tensor(0.5), torch.tensor(0.5), torch.tensor(0.1))
         self.x_cyl, self.y_cyl = x_cyl.to(device), y_cyl.to(device)
+        self.t_collocation = torch.linspace(domain.t_min, domain.t_max, domain.n, device=device)
         self.bordure = domain.generate_border()
         
         self.physics = physics
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.1)
-
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)# optimiseur adam
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, 
+            'min', #on cherche à minimiser la loss
+            factor=0.5, #newLr = facteur*Lr
+            patience=300) # combien d'époque avant de diminuer) 
+        
+        ##LBFGS
+        self.lbfgs = torch.optim.LBFGS(
+            self.model.parameters(), 
+            lr=1,                       # On met souvent 1 car le line_search gère le pas
+            max_iter=500,
+            tolerance_grad=1e-12,    # Nb de sous-itérations par step
+            tolerance_change=1e-15,                
+            history_size=50,            # Mémoire des gradients passés
+            line_search_fn="strong_wolfe") # INDISPENSABLE pour la stabilité en PINNs
+        
     def train(self, num_epochs):
         for epochs in range(num_epochs):
             self.optimizer.zero_grad() # toujours reinitialiser pour éviter accumulation du gradient
             #x_gpu, y_gpu, t_gpu = self.x.to(device), self.y.to(device), self.t.to(device)
             # u_pred = self.u(x_gpu, y_gpu, t_gpu)
-            with torch.autocast(device_type='mps'):# permet d'optimiser les calculs (passe en float16 parfois)
-                loss = self.physics.compute_total_loss(self.model, self.x, self.y, self.t, self.bordure, self.x_cyl, self.y_cyl)# calcul de la loss (optimisable car on rentre dedans le modèle et pas l'inférence donc on recalule plusieurs fois les memes choses)
-                loss.backward()
+            loss = self.physics.compute_total_loss(self.model, self.x, self.y, self.t, self.bordure, self.x_cyl, self.y_cyl, self.t_collocation)# calcul de la loss (optimisable car on rentre dedans le modèle et pas l'inférence donc on recalule plusieurs fois les memes choses)
+            loss.backward()
 
             self.optimizer.step()
+            self.scheduler.step(loss.detach().item())# ici le scheduler n'a besoin que de la valeur de la loss pas du graph etc
+            if epochs%100==0:
+                current_lr = self.optimizer.param_groups[0]['lr']
+                print(f"epoch : {epochs}, loss = {loss.item():3f}, LR = {current_lr:3e}")
+        
+        # affinage du modèle (Closure)
 
-            if epochs%20==0:
-                print(f"epoch : {epochs}, loss = {loss.item()}")
+        def closure():
+            self.lbfgs.zero_grad()
+            # On recalcule la perte totale (PDE + BC + IC)
+            loss = physics.compute_total_loss(self.model, self.x, self.y, self.t, self.bordure, self.x_cyl, self.y_cyl, self.t_collocation) 
+            loss.backward()
+            if self.iter_count % 10 == 0:
+                print(f"L-BFGS Iter: {self.iter_count} | Loss: {loss.item():.6e}")
+            self.iter_count += 1
+            return loss
+        
+        self.iter_count=0
+        self.lbfgs.step(closure)
+        
+
 
 
 def convert_tensor_to_array(tensor):
@@ -288,14 +311,17 @@ if __name__ == '__main__':
     #train
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Calculs effectués sur : {device}")
-    domain = Domain(t_max=0.5)
+    domain = Domain(n=40000, t_max=1)
     domain.sample_2D_training()
     domain.exclude_collocation_cylinder(torch.tensor(0.5), torch.tensor(0.5), torch.tensor(0.1))
-    model = HeatPINN().to(device) # calculs sur le gpu
-    physics = Physics(0.1)
+    model = NavierPINN().to(device) # calculs sur le gpu
+    physics = Physics(0.001)
     
     solver = Solver(model, domain, physics)
-    solver.train(1000)
+    solver.train(2000)
+    
+    path = 'PINN_navier_cylinder'
+    torch.save(solver.model.state_dict(), path)
 
     #test
     domain.create_grid_testing()

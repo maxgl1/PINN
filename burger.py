@@ -4,9 +4,9 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 from scipy.stats import qmc
 import numpy as np
-from main import Domain
+from heat import Domain
 
-class HeatPINN(nn.Module):# on fait hérier de nn.Module pour que pytorch gère ensuite seul et sache entre autre quel poids mettre à jour, tout les parametres du modèle seront dans self.parameters()
+class BurgerPINN(nn.Module):# on fait hérier de nn.Module pour que pytorch gère ensuite seul et sache entre autre quel poids mettre à jour, tout les parametres du modèle seront dans self.parameters()
     def __init__(self):
         super().__init__()# on initialise la classe parente
         self.net = nn.ModuleList([nn.Linear(3, 20)]+[nn.Linear(20, 20) for _ in range(4)]+[nn.Linear(20, 2)]) # on définit juste des blocs qu'on pourra utiliser ou non (différent de sequential qui fait lui meme les enchainements)
@@ -167,7 +167,7 @@ if __name__ == '__main__':
     #train
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Calculs effectués sur : {device}")
-    model = HeatPINN().to(device) # calculs sur le gpu
+    model = BurgerPINN().to(device) # calculs sur le gpu
     physics = Physics(0.001)
     domain = Domain(t_max=2)
     solver = Solver(model, domain, physics)

@@ -121,7 +121,7 @@ class Solver:
             self.optimizer.zero_grad() # toujours reinitialiser pour éviter accumulation du gradient
             #x_gpu, y_gpu, t_gpu = self.x.to(device), self.y.to(device), self.t.to(device)
             # u_pred = self.u(x_gpu, y_gpu, t_gpu)
-            loss = self.physics.compute_total_loss(self.u, self.x, self.y, self.t, self.bounds)# calcul de la loss (optimisable car on rentre dedans le modèle et pas l'inférence donc on recalule plusieurs fois les memes choses)
+            loss = self.physics.compute_total_loss(self.u, self.x, self.y, self.t, self.bounds)# calcul de la loss (optimisable car on rentre dedans le modèle et pas l'inférence donc on recalcul plusieurs fois les memes choses)
             loss.backward()
 
             self.optimizer.step()
@@ -131,50 +131,21 @@ class Solver:
                 print(f"epoch : {epochs}, loss = {loss.item()}")
 
 
-def convert_tensor_to_array(tensor):
-    array = tensor.squeeze().detach().numpy()
-    return array
 
-def plot_w_slider(arr_y, domain):
-# Reshape en grille 2D (espace, temps)
-    evolution = arr_y.reshape(domain.x_collocation.shape[0], domain.t_collocation.shape[0])
-    
-    fig, ax = plt.subplots(figsize=(8, 6))
-    plt.subplots_adjust(bottom=0.25)
-    
-    # Plot initial
-    line, = ax.plot(domain.x_collocation.detach().numpy(), evolution[:, 0])
-    ax.set_xlabel('x')
-    ax.set_ylabel('u(x, t)')
-    ax.set_title("Équation de la chaleur")
-    ax.set_ylim([evolution.min(), evolution.max()])
-    
-    ax_slider = plt.axes([0.2, 0.1, 0.6, 0.03])
-    slider_temps = Slider(ax_slider, 'Instant t', 0, evolution.shape[1]-1, valinit=0, valfmt='%d')
-    
-    def update(val):
-        t_index = int(slider_temps.val)
-        line.set_ydata(evolution[:, t_index])
-        fig.canvas.draw_idle()
-    
-    slider_temps.on_changed(update)
-    plt.show()
 
 def plot_w_slider_2d(arr_y, domain):
     # 1. Récupération des dimensions
-    nx = len(np.unique(domain.x_grid.detach().numpy()))# en gros la on retrouve le nombre d'itérations qu'on a fait
+    nx = len(np.unique(domain.x_grid.detach().numpy()))# ici on retrouve le nombre d'itérations qu'on a fait
     ny = len(np.unique(domain.y_grid.detach().numpy()))
     nt = len(np.unique(domain.t_grid.detach().numpy()))
     
     # 2. Reshape : Attention à l'ordre (x, y, t)
-    # Si arr_y a été généré sur une grille, l'ordre doit correspondre
     evolution = arr_y.reshape(nx, ny, nt)
     
     fig, ax = plt.subplots(figsize=(8, 7))
     plt.subplots_adjust(bottom=0.2)
     
     # 3. Affichage de l'état initial (t=0)
-    # On affiche la tranche [:, :, 0]
     im = ax.imshow(evolution[:, :, 0].T, extent=[domain.x_min, domain.x_max, domain.y_min, domain.y_max]
                    , origin='lower', cmap='hot', aspect='auto')
     
