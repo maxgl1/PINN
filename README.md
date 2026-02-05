@@ -7,14 +7,18 @@ Implémentation de réseaux de neurones informés par la physique pour résoudre
 ### Équation de la chaleur (heat.py)
 
 Résolution de l'équation de diffusion en 2D+temps. La condition initiale est un produit de sinus, et j'ai mis des conditions de Dirichlet homogène aux bords. Le réseau a appris comment la température se diffusait au fil du temps. La visualisation interactive avec slider permet de voir comment le profil change.
+![pret_gif_chaleur](https://github.com/user-attachments/assets/0799af4e-393c-41b7-b760-a5c3b3401be4)
 
 ### Problème inverse (heat_inverse.py)
 
 Au lieu de résoudre avec un coefficient de diffusion fixe, on l'apprend directement à partir de mesures virtuelles placées dans le domaine. C'est utile en pratique : dans beaucoup de situations réelles, on connaît mal les paramètres physiques (conductivité thermique, viscosité, perméabilité d'un matériau). Ici le réseau identifie le paramètre inconnu en minimisant l'écart entre ses prédictions et les données des capteurs, il fait alors partie des paramètres du modèle.
-
+![pret_gif_inverse](https://github.com/user-attachments/assets/e305d26f-5e6a-4eb2-833c-1452b87aca33)
 ### Équations de Burgers (burger.py)
 
 Système non-linéaire avec advection et diffusion. C'est plus intéressant que la chaleur parce qu'il y a des phénomènes d'onde. J'ai pu vérifier que les solutions convergent correctement quand on les compare aux solutions analytiques.
+
+![pret_gif_uburger](https://github.com/user-attachments/assets/0d0757bf-7fd6-4131-85b7-81fede3df652)
+![pret_gif_burgerv](https://github.com/user-attachments/assets/10f3dde8-d6fc-4e29-ba29-72d7d4066f64)
 
 ### Équations de Navier-Stokes (navier.py)
 
