@@ -48,8 +48,8 @@ class Domain:
         x_collocation = torch.linspace(self.x_min, self.x_max, self.n)
         y_collocation = torch.linspace(self.y_min, self.y_max, self.n)
         t_collocation = torch.linspace(self.t_min, self.t_max, self.n)
-        self.X, self.Y, self.T = torch.meshgrid(x_collocation, y_collocation, t_collocation, indexing='ij') # forme les 2 grilles
-        self.x_grid , self.y_grid, self.t_grid = self.X.reshape(-1, 1), self.Y.reshape(-1, 1), self.T.reshape(-1, 1)
+        self.X, self.Y, self.T = torch.meshgrid(x_collocation, y_collocation, t_collocation, indexing='ij') # forme les points pour bien avoir une grille quand on plot
+        self.x_grid , self.y_grid, self.t_grid = self.X.reshape(-1, 1), self.Y.reshape(-1, 1), self.T.reshape(-1, 1) # données pour notre tes(plot)
         return self.x_grid , self.y_grid, self.t_grid
 
 
@@ -73,7 +73,8 @@ class Physics:
     def compute_initial_condition(self, u, x_0, y_0):
         t_0 = torch.zeros_like(x_0)
         u_0 = u(x_0, y_0, t_0) # de taille (N, 1), contient toute les position pour t=0
-        u_target = 10*torch.exp(-((x_0 - 0.5) ** 2 + (y_0 - 0.5) ** 2) / (2 * 0.1 ** 2)).to(device)    # Gaussienne centrée en (0.5, 0.5) avec écart-type 0.1, sur le gpu car la mse s'y fait
+        u_target = torch.sin(torch.pi*x_0)*torch.sin(torch.pi*y_0).to(device) # solution analytique
+        # u_target = 10*torch.exp(-((x_0 - 0.5) ** 2 + (y_0 - 0.5) ** 2) / (2 * 0.1 ** 2)).to(device)    # Gaussienne centrée en (0.5, 0.5) avec écart-type 0.1, sur le gpu car la mse s'y fait
         mse = nn.MSELoss()
         return mse(u_0, u_target) # on calcule la loss (valeur sous forme de tenseur direct)
 
@@ -161,9 +162,9 @@ def plot_w_slider(arr_y, domain):
 
 def plot_w_slider_2d(arr_y, domain):
     # 1. Récupération des dimensions
-    nx = len(np.unique(domain.X.detach().numpy()))# en gros la on retrouve le nombre d'itérations qu'on a fait
-    ny = len(np.unique(domain.X.detach().numpy()))
-    nt = len(np.unique(domain.X.detach().numpy()))
+    nx = len(np.unique(domain.x_grid.detach().numpy()))# en gros la on retrouve le nombre d'itérations qu'on a fait
+    ny = len(np.unique(domain.y_grid.detach().numpy()))
+    nt = len(np.unique(domain.t_grid.detach().numpy()))
     
     # 2. Reshape : Attention à l'ordre (x, y, t)
     # Si arr_y a été généré sur une grille, l'ordre doit correspondre
@@ -197,13 +198,13 @@ def plot_w_slider_2d(arr_y, domain):
 
 
 if __name__ == '__main__':
-    torch.manual_seed(43)
+    torch.manual_seed(3)
     #train
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Calculs effectués sur : {device}")
     model = HeatPINN().to(device) # calculs sur le gpu
     physics = Physics(0.5)
-    domain = Domain()
+    domain = Domain(t_max=0.2)
     solver = Solver(model, domain, physics)
     solver.train(2000, solver.bounds)
 
@@ -214,15 +215,3 @@ if __name__ == '__main__':
     arr_y = y.squeeze().detach().cpu().numpy()
     
     plot_w_slider_2d(arr_y, domain)
-    
-
-"""
-print(model.forward(torch.tensor([[3.0]]), torch.tensor([[4.0]])))
-res0 = physics.compute_pde_residual(model, domain.x_grid, domain.t_grid)
-print(res0)
-res1 = physics.compute_initial_condition(model,torch.tensor([[1.0]]) )
-print(res1)
-bounds = {0.0:1.0, 1.0:5.0}
-res2 = physics.compute_boundary_loss(model, bounds, torch.tensor([[0.0]]))
-print(res2)
-res3 = res2 = physics.compute_total_loss(model, domain.x_grid, domain.t_grid, bounds)"""

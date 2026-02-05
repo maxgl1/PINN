@@ -173,6 +173,7 @@ def plot_list(list, name):
     plt.show()
 if __name__ == '__main__':
     torch.manual_seed(3)
+    
     #train
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Calculs effectués sur : {device}")
@@ -182,7 +183,7 @@ if __name__ == '__main__':
     sensor = Sensor([[0.25, 0.25],[0.75, 0.25],[0.25, 0.75],[0.5, 0.5]], domain.t.to(device), 0.5)# position des capteurs
     physics = Physics(sensor)
     solver = Solver(model, domain, physics)
-    solver.train(4000)
+    solver.train(2000)
 
     #test
     domain.create_grid_testing()
