@@ -44,24 +44,26 @@ class Physics:
         mse = nn.MSELoss()
         return mse(u_0, u_target) # on calcule la loss (valeur sous forme de tenseur direct)
 
-    def compute_boundary_loss(self, u, bounds:dict, t):# bounds contient {i:(les x, u_target)} (en float) pour chaque point de bordure ou i correspond a la dimension : ex x: sur [x, 0] ca vaut u_target
+    def compute_boundary_loss(self, u, bordure:dict, t):# bounds contient {i:(les x, u_target)} (en float) pour chaque point de bordure ou i correspond a la dimension : ex x: sur [x, 0] ca vaut u_target
         mse = nn.MSELoss()
         s=torch.tensor(0.0).to(device) # pour pouvoir sommer sur le gpu
-        for k, v in bounds.items():
-            if k=='x':
-                x_bs = v[0]# on récupère les x
-                y_bs = torch.zeros_like(x_bs)
-                u_b = u(x_bs, y_bs, t)
-                u_target = v[1]
-                u_ts = (torch.ones_like(t)*u_target)# pareil pour avoir la forme de t sur la target
-                s+=mse(u_b, u_ts)
-            if k=='y':
-                y_bs = v[0]# on récupère les y
-                x_bs = torch.zeros_like(y_bs)
-                u_b = u(x_bs, y_bs, t)
-                u_target = v[1]
-                u_ts = (torch.ones_like(t)*u_target)# pareil pour avoir la forme de t sur la target
-                s+=mse(u_b, u_ts)
+        for k, val in bordure.items():
+            if k=='g': #CL : u=0
+                u_p = u(val[0], val[1], val[2])
+                u_g = torch.zeros_like(u_p)
+                s+=mse(u_p, u_g)
+            if k=='b':# CL : u=0
+                u_p = u(val[0], val[1], val[2])
+                u_b = torch.zeros_like(u_p)
+                s+=mse(u_p, u_b)
+            if k=='h':# CL : u=0
+                u_p = u(val[0], val[1], val[2])
+                u_b = torch.zeros_like(u_p)
+                s+=mse(u_p, u_b)
+            if k=='d': #CL : u=0 
+                u_p = model(val[0], val[1], val[2])
+                u_b = torch.zeros_like(u_p)
+                s+=mse(u_p, u_b)
         return s
 
     def compute_total_loss(self, u, x, y, t, bounds, a=1, b=1, c=1):
@@ -106,7 +108,7 @@ class Solver:
         self.domain = domain
         x, y, t = domain.sample_2D_training()
         self.x, self.y, self.t = x.to(device), y.to(device), t.to(device)# on travaille sur le gpu (mps)
-        self.bounds = {'x':(self.x, torch.zeros_like(self.x)), 'y':(self.y, torch.zeros_like(self.y))}
+        self.bounds = domain.generate_border()
         self.physics = physics
         params = list(self.u.parameters()) +[physics.alpha_parameter] # on ajoute alpha aux paramètres du modèle
         self.optimizer = torch.optim.Adam(params, lr=0.01)
@@ -148,7 +150,7 @@ def plot_w_slider_2d(arr_y, domain):
     # On affiche la tranche [:, :, 0]
     im = ax.imshow(evolution[:, :, 0].T, extent=[domain.x_min, domain.x_max, domain.y_min, domain.y_max]
                    , origin='lower', cmap='hot', aspect='auto')
-    
+    plt.scatter([0.25, 0.75, 0.25, 0.5], [0.25, 0.25, 0.75, 0.5], color='blue', marker='x', s=50, label='Capteurs')
     ax.set_xlabel('x')
     ax.set_ylabel('y')
     fig.colorbar(im, ax=ax, label='Température u(x, y)')
@@ -161,7 +163,7 @@ def plot_w_slider_2d(arr_y, domain):
         t_index = int(slider_temps.val)
         # Mise à jour des données de l'image
         im.set_data(evolution[:, :, t_index].T)
-        ax.set_title(f"Équation de la chaleur - Pas de temps : {t_index}")
+        ax.set_title(f"Équation de la chaleur avec capteurs - Pas de temps : {t_index}")
         fig.canvas.draw_idle()
     
     slider_temps.on_changed(update)
@@ -184,6 +186,9 @@ if __name__ == '__main__':
     physics = Physics(sensor)
     solver = Solver(model, domain, physics)
     solver.train(2000)
+
+    path = 'pretrained/PINN_heat_inverse.pth'
+    torch.save(solver.u.state_dict(), path)
 
     #test
     domain.create_grid_testing()

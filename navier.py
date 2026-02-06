@@ -228,7 +228,7 @@ class Solver:
             self.model.parameters(), 
             lr=1,                       # On met souvent 1 car le line_search gère le pas
             max_iter=500,
-            tolerance_grad=1e-12,    # Nb de sous-itérations par step
+            tolerance_grad=1e-15,    # Nb de sous-itérations par step
             tolerance_change=1e-15,                
             history_size=50,            # Mémoire des gradients passés
             line_search_fn="strong_wolfe") # INDISPENSABLE pour la stabilité en PINNs
@@ -269,7 +269,7 @@ def convert_tensor_to_array(tensor):
     array = tensor.squeeze().detach().numpy()
     return array
 
-def plot_w_slider_2d(arr_y, domain):
+def plot_w_slider_2d(arr_y, domain, str):
     # 1. Récupération des dimensions
     nx = len(np.unique(domain.x_grid.detach().numpy()))# en gros la on retrouve le nombre d'itérations qu'on a fait
     ny = len(np.unique(domain.y_grid.detach().numpy()))
@@ -289,7 +289,7 @@ def plot_w_slider_2d(arr_y, domain):
     
     ax.set_xlabel('x')
     ax.set_ylabel('y')
-    fig.colorbar(im, ax=ax, label='Température u(x, y)')
+    fig.colorbar(im, ax=ax, label=f'vitesse {str}(x, y)')
     
     # 4. Configuration du Slider
     ax_slider = plt.axes([0.2, 0.05, 0.6, 0.03])
@@ -320,7 +320,7 @@ if __name__ == '__main__':
     solver = Solver(model, domain, physics)
     solver.train(2000)
     
-    path = 'PINN_navier_cylinder'
+    path = 'pretrained/PINN_navier_cylinder.pth'
     torch.save(solver.model.state_dict(), path)
 
     #test
@@ -330,6 +330,6 @@ if __name__ == '__main__':
     arr_u = u.squeeze().detach().cpu().numpy()
     arr_v = v.squeeze().detach().cpu().numpy()
     
-    plot_w_slider_2d(arr_u, domain)
+    plot_w_slider_2d(arr_u, domain, 'u')
 
-    plot_w_slider_2d(arr_v, domain)
+    plot_w_slider_2d(arr_v, domain, 'v')
