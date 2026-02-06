@@ -7,22 +7,93 @@ Implémentation de réseaux de neurones informés par la physique pour résoudre
 ### Équation de la chaleur (heat.py)
 
 Résolution de l'équation de diffusion en 2D+temps. La condition initiale est un produit de sinus, et j'ai mis des conditions de Dirichlet homogène aux bords. Le réseau a appris comment la température se diffusait au fil du temps. La visualisation interactive avec slider permet de voir comment le profil change.
-![pret_gif_chaleur](https://github.com/user-attachments/assets/0799af4e-393c-41b7-b760-a5c3b3401be4)
+
+$$ \frac{\partial u}{\partial t} = \alpha \left( \frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} \right) $$
+
+
+<p align="center"> <b>Visualisation de la diffusion thermique</b>
+
+
+<video src="https://github.com/user-attachments/assets/9bb33495-bfa5-40fa-9fd5-5f47508f2173" width="70%" autoplay loop muted></video> </p>
+
+
+
+
 
 ### Problème inverse (heat_inverse.py)
 
-Au lieu de résoudre avec un coefficient de diffusion fixe, on l'apprend directement à partir de mesures virtuelles placées dans le domaine. C'est utile en pratique : dans beaucoup de situations réelles, on connaît mal les paramètres physiques (conductivité thermique, viscosité, perméabilité d'un matériau). Ici le réseau identifie le paramètre inconnu en minimisant l'écart entre ses prédictions et les données des capteurs, il fait alors partie des paramètres du modèle.
-![pret_gif_inverse](https://github.com/user-attachments/assets/e305d26f-5e6a-4eb2-833c-1452b87aca33)
+Au lieu de résoudre avec un coefficient de diffusion fixe, on l'apprend directement à partir de mesures virtuelles placées dans le domaine. C'est utile en pratique : dans beaucoup de situations réelles, on connaît mal les paramètres physiques (conductivité thermique, viscosité, perméabilité d'un matériau). Ici le réseau identifie le paramètre inconnu en minimisant l'écart entre ses prédictions et les données des capteurs, il fait alors parti des paramètres du modèle. Ici, seulement 4 capteurs ont suffi pour estimer la valeur réelle.
+
+$$
+\begin{cases} 
+\alpha_{réel} = 0.5 \\ 
+\alpha_{pinn} = 0.52 
+\end{cases} 
+\implies \epsilon_{relatif} = 4.0 \times 10^{-2}
+$$
+<p align="center"> <b>Identification du paramètre inconnu, capteurs positionné sur les croix</b>
+
+
+<video src="https://github.com/user-attachments/assets/3475a8cc-8fb0-40ef-94b8-5655d0959caf" width="70%" autoplay loop muted></video> </p>
+
+
+
+
+
 ### Équations de Burgers (burger.py)
 
 Système non-linéaire avec advection et diffusion. C'est plus intéressant que la chaleur parce qu'il y a des phénomènes d'onde. J'ai pu vérifier que les solutions convergent correctement quand on les compare aux solutions analytiques.
 
-![pret_gif_uburger](https://github.com/user-attachments/assets/0d0757bf-7fd6-4131-85b7-81fede3df652)
-![pret_gif_burgerv](https://github.com/user-attachments/assets/10f3dde8-d6fc-4e29-ba29-72d7d4066f64)
+$$
+\begin{cases}
+\frac{\partial u}{\partial t} + u \frac{\partial u}{\partial x} + v \frac{\partial u}{\partial y} = \nu \left( \frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} \right) \\
+\frac{\partial v}{\partial t} + u \frac{\partial v}{\partial x} + v \frac{\partial v}{\partial y} = \nu \left( \frac{\partial^2 v}{\partial x^2} + \frac{\partial^2 v}{\partial y^2} \right)
+\end{cases}
+$$
+
+<table width="100%"> <tr> <td align="center" width="50%"> <b>Profil des vitesses de u au cours du temps</b>
+
+
+<video src="https://github.com/user-attachments/assets/fbf6ad1f-eba1-4838-a437-2bb3f802ed80" width="100%" autoplay loop muted></video> </td> <td align="center" width="50%"> <b>Profil des vitesses de v au cours du temps</b>
+
+
+<video src="https://github.com/user-attachments/assets/f233f09c-94c2-4dec-8227-ce85e66d8e03" width="100%" autoplay loop muted></video> </td> </tr> </table>
+
+
+
+
+
+
+
+
 
 ### Équations de Navier-Stokes (navier.py)
 
 Le plus complexe : flux autour d'un cylindre en 2D. Il faut gérer trois inconnues (u, v, p), trois équations (momentum x, momentum y, continuité), et des conditions de no-slip sur l'obstacle. J'utilise une optimisation en deux phases : d'abord Adam pour la convergence globale, puis L-BFGS pour affiner. Une capacité de calcul plus grande aurait pu permettre d'observer les célèbres allées de tourbillons de Karman.
+
+$$
+\begin{cases} 
+\frac{\partial u}{\partial x} + \frac{\partial v}{\partial y} = 0 \\ 
+\frac{\partial u}{\partial t} + u \frac{\partial u}{\partial x} + v \frac{\partial u}{\partial y} = -\frac{\partial p}{\partial x} + \nu \left( \frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} \right) \\ 
+\frac{\partial v}{\partial t} + u \frac{\partial v}{\partial x} + v \frac{\partial v}{\partial y} = -\frac{\partial p}{\partial y} + \nu \left( \frac{\partial^2 v}{\partial x^2} + \frac{\partial^2 v}{\partial y^2} \right) 
+\end{cases}
+$$
+
+<table width="100%"> <tr> <td align="center" width="50%"> <b>Profil des vitesses (u) au cours du temps</b>
+
+
+<video src="https://github.com/user-attachments/assets/f18529b4-aab4-4022-a297-569f1155cca1" width="100%" autoplay loop muted></video> </td> <td align="center" width="50%"> <b>Profil des vitesses (v) au cours du temps</b>
+
+
+<video src="https://github.com/user-attachments/assets/42068656-0682-491f-a8f7-19ecb1fbb581" width="100%" autoplay loop muted></video> </td> </tr> </table>
+
+
+
+
+
+
+
+
 
 
 
@@ -35,6 +106,8 @@ La perte à minimiser a plusieurs composantes :
 - Les conditions initiales
 - Les conditions au bord
 - Les éventuelles contraintes (obstacles, no-slip)
+
+$$ \mathcal{L} = \mathcal{L}_{init} + \mathcal{L}_{residu} + \mathcal{L}_{bord} + \mathcal{L}_{obstacles}$$
 
 Les dérivées partielles sont calculées avec `torch.autograd.grad()` en utilisant `create_graph=True` pour les dérivées secondes. C'est coûteux, donc je sample les points avec Latin Hypercube pour couvrir le domaine de manière uniforme tout en restant aléatoire.
 
@@ -49,9 +122,3 @@ J'ai utilisé principalement Adam pour l'optimisation, cependant l'équation de 
 - NumPy
 
 Pour GPU : CUDA ou MPS (M1/M2/M3 Apple Silicon)
-
-## Ce que j'ai appris
-
-L'approche PINN m'a montré comment combiner deep learning et physique numérique. L'enjeu principal est la balance entre les termes de perte : si on pèse trop les conditions au bord, le réseau les satisfait parfaitement mais ignore l'EDP.
-
-Le calcul des dérivées par autograd peut être coûteux sur grandes grilles, donc l'optimisation du sampling et du nombre de points est crucial.
