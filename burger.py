@@ -63,30 +63,31 @@ class Physics:
         mse_v = mse(v_0, v_target)
         return mse_u + mse_v # on calcule la loss (valeur sous forme de tenseur direct)
 
-    def compute_boundary_loss(self, model, bounds:dict, t):# bounds contient {i:(les x, u_target)} (en float) pour chaque point de bordure ou i correspond a la dimension : ex x: sur [x, 0] ca vaut u_target
+    def compute_boundary_loss(self, model, bordure:dict, t):# bounds contient {i:(les x, u_target)} (en float) pour chaque point de bordure ou i correspond a la dimension : ex x: sur [x, 0] ca vaut u_target
         mse = nn.MSELoss()
-        su=torch.tensor(0.0, device=device) # pour pouvoir sommer sur le gpu
-        sv = torch.tensor(0.0, device=device)
-        for k, v in bounds.items():
-            if k=='x':
-                x_bs = v[0]# on récupère les x
-                y_bs = torch.zeros_like(x_bs)
-                u_b, v_b = torch.split(model(x_bs, y_bs, t), 1, dim=1)
-                u_target, v_target = v[1][0], v[1][1] # un couple qui contient toutes les valeurs de target
-                u_ts = (torch.ones_like(t)*u_target)# pareil pour avoir la forme de t sur la target
-                v_ts = torch.ones_like(t)*v_target
-                su+=mse(u_b, u_ts)
-                sv+=mse(v_b, v_ts)
-            if k=='y':
-                y_bs = v[0]# on récupère les y
-                x_bs = torch.zeros_like(y_bs)
-                u_b, v_b = torch.split(model(x_bs, y_bs, t), 1, dim=1)
-                u_target, v_target = v[1][0], v[1][1] # un couple qui contient toutes les valeurs de target
-                u_ts = (torch.ones_like(t)*u_target)# pareil pour avoir la forme de t sur la target
-                v_ts = torch.ones_like(t)*v_target
-                su+=mse(u_b, u_ts)
-                sv+=mse(v_b, v_ts)
-        return su + sv
+        s=torch.tensor(0.0, device=device) # pour pouvoir sommer sur le gpu
+        for k, val in bordure.items():
+            if k=='g': #CL : u=0
+                u, v = torch.split(model(val[0], val[1], val[2]), 1, dim=1)
+                u_g = torch.zeros_like(u)
+                v_b = torch.zeros_like(v)
+                s+=mse(u, u_g) +mse(v, v_b)
+            if k=='b':# CL : u=0
+                u, v = torch.split(model(val[0], val[1], val[2]), 1, dim=1)
+                u_b = torch.zeros_like(u)
+                v_b = torch.zeros_like(v)
+                s+=mse(u, u_g) +mse(v, v_b)
+            if k=='h':# CL : u=0
+                u, v = torch.split(model(val[0], val[1], val[2]), 1, dim=1)
+                u_b = torch.zeros_like(u)
+                v_b = torch.zeros_like(v)
+                s+=mse(u, u_g) +mse(v, v_b)
+            if k=='d': #CL : u=0 
+                u, v = torch.split(model(val[0], val[1], val[2]), 1, dim=1)
+                u_b = torch.zeros_like(u)
+                v_b = torch.zeros_like(v)
+                s+=mse(u, u_g) +mse(v, v_b)
+        return s
 
     def compute_total_loss(self, model, x, y, t, bounds, a=1, b=1, c=1):
         pde_u, pde_v = self.compute_pde_residual(model, x, y, t)
@@ -102,7 +103,7 @@ class Solver:
         self.domain = domain
         x, y, t = domain.sample_2D_training()
         self.x, self.y, self.t = x.to(device), y.to(device), t.to(device)# on travaille sur le gpu (mps)
-        self.bounds = {'x':(self.x, (torch.zeros_like(self.x), torch.zeros_like(self.x))), 'y':(self.y, (torch.zeros_like(self.x), torch.zeros_like(self.y)))}
+        self.bounds = domain.generate_border()
         self.physics = physics
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
 
@@ -125,7 +126,7 @@ def convert_tensor_to_array(tensor):
     array = tensor.squeeze().detach().numpy()
     return array
 
-def plot_w_slider_2d(arr_y, domain):
+def plot_w_slider_2d(arr_y, domain, str):
     # 1. Récupération des dimensions
     nx = len(np.unique(domain.x_grid.detach().numpy()))# en gros la on retrouve le nombre d'itérations qu'on a fait
     ny = len(np.unique(domain.y_grid.detach().numpy()))
@@ -145,7 +146,7 @@ def plot_w_slider_2d(arr_y, domain):
     
     ax.set_xlabel('x')
     ax.set_ylabel('y')
-    fig.colorbar(im, ax=ax, label='Température u(x, y)')
+    fig.colorbar(im, ax=ax, label=f'Vitesse {str}(x, y)')
     
     # 4. Configuration du Slider
     ax_slider = plt.axes([0.2, 0.05, 0.6, 0.03])
@@ -155,7 +156,7 @@ def plot_w_slider_2d(arr_y, domain):
         t_index = int(slider_temps.val)
         # Mise à jour des données de l'image
         im.set_data(evolution[:, :, t_index].T)
-        ax.set_title(f"Équation de la chaleur - Pas de temps : {t_index}")
+        ax.set_title(f"Équation de burger - Pas de temps : {t_index}")
         fig.canvas.draw_idle()
     
     slider_temps.on_changed(update)
@@ -168,18 +169,20 @@ if __name__ == '__main__':
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Calculs effectués sur : {device}")
     model = BurgerPINN().to(device) # calculs sur le gpu
-    physics = Physics(0.001)
+    physics = Physics(0.01)
     domain = Domain(t_max=2)
     solver = Solver(model, domain, physics)
     solver.train(2000, solver.bounds)
 
+    path = "pretrained/PINN_burger.pth"
+    torch.save(solver.model.state_dict(), path)
     #test
     domain.create_grid_testing()
     with torch.no_grad(): # pas besoin de sauvegar
         u, v = torch.split(model(domain.x_grid.to(device), domain.y_grid.to(device), domain.t_grid.to(device)), 1, dim=1)
     arr_u = u.squeeze().detach().cpu().numpy()
-    arr_v = u.squeeze().detach().cpu().numpy()
+    arr_v = v.squeeze().detach().cpu().numpy()
     
-    plot_w_slider_2d(arr_u, domain)
+    plot_w_slider_2d(arr_u, domain, 'u')
 
-    plot_w_slider_2d(arr_v, domain)
+    plot_w_slider_2d(arr_v, domain, 'v')

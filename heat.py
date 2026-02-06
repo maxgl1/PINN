@@ -20,7 +20,7 @@ class HeatPINN(nn.Module):# on fait hérier de nn.Module pour que pytorch gère 
         return u # de taille (N, 1)
 
 class Domain:
-    def __init__(self,n=100, x_min=0, x_max=1, y_min=0, y_max=1, z_min=0, z_max=1, t_min=0, t_max=1):
+    def __init__(self,n=1000, x_min=0, x_max=1, y_min=0, y_max=1, z_min=0, z_max=1, t_min=0, t_max=1):
         self.n = n
 
         self.x_min = x_min
@@ -45,13 +45,36 @@ class Domain:
         return self.x, self.y, self.t
     
     def create_grid_testing(self):
-        x_collocation = torch.linspace(self.x_min, self.x_max, self.n)
-        y_collocation = torch.linspace(self.y_min, self.y_max, self.n)
-        t_collocation = torch.linspace(self.t_min, self.t_max, self.n)
+        x_collocation = torch.linspace(self.x_min, self.x_max, 100)
+        y_collocation = torch.linspace(self.y_min, self.y_max, 100)
+        t_collocation = torch.linspace(self.t_min, self.t_max, 100)
         self.X, self.Y, self.T = torch.meshgrid(x_collocation, y_collocation, t_collocation, indexing='ij') # forme les points pour bien avoir une grille quand on plot
         self.x_grid , self.y_grid, self.t_grid = self.X.reshape(-1, 1), self.Y.reshape(-1, 1), self.T.reshape(-1, 1) # données pour notre tes(plot)
         return self.x_grid , self.y_grid, self.t_grid
 
+    def generate_border(self, n_bord=100):
+        t_rand = torch.rand(n_bord, 1) * self.t_max# loi uniforme, on multiplie par la bonne valeur pour obtenir le bon interval
+        y_rand = torch.rand(n_bord, 1) * (self.y_max - self.y_min) + self.y_min # pareil pour que ca commence a y_min
+        x_rand = torch.rand(n_bord, 1) * (self.x_max - self.x_min) + self.x_min # pour que ca commence a x_min
+        self.bordure = {}
+
+        # GAUCHE (Inlet) : x=0, y=aléatoire, t=aléatoire
+        self.bordure['g'] = [torch.full((n_bord, 1), self.x_min), y_rand, t_rand] #.full(size, value) : créeé n_bord point a la valeur self.x_min
+
+        # DROITE (Outlet) : x=1, y=aléatoire, t=aléatoire
+        self.bordure['d'] = [torch.full((n_bord, 1), self.x_max), y_rand, t_rand]
+        
+        # HAUT : x=aléatoire, y=1, t=aléatoire
+        self.bordure['h'] = [x_rand, torch.full((n_bord, 1), self.y_max), t_rand]
+
+        # BAS : x=aléatoire, y=0, t=aléatoire
+        self.bordure['b'] = [x_rand, torch.full((n_bord, 1), self.y_min), t_rand]
+        
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+
+        for k in self.bordure:
+            self.bordure[k] = [v.to(device) for v in self.bordure[k]]
+        return self.bordure
 
 
 class Physics:
@@ -78,24 +101,26 @@ class Physics:
         mse = nn.MSELoss()
         return mse(u_0, u_target) # on calcule la loss (valeur sous forme de tenseur direct)
 
-    def compute_boundary_loss(self, u, bounds:dict, t):# bounds contient {i:(les x, u_target)} (en float) pour chaque point de bordure ou i correspond a la dimension : ex x: sur [x, 0] ca vaut u_target
+    def compute_boundary_loss(self, u, bordure:dict, t):# bounds contient {i:(les x, u_target)} (en float) pour chaque point de bordure ou i correspond a la dimension : ex x: sur [x, 0] ca vaut u_target
         mse = nn.MSELoss()
         s=torch.tensor(0.0).to(device) # pour pouvoir sommer sur le gpu
-        for k, v in bounds.items():
-            if k=='x':
-                x_bs = v[0]# on récupère les x
-                y_bs = torch.zeros_like(x_bs)
-                u_b = u(x_bs, y_bs, t)
-                u_target = v[1]
-                u_ts = (torch.ones_like(t)*u_target)# pareil pour avoir la forme de t sur la target
-                s+=mse(u_b, u_ts)
-            if k=='y':
-                y_bs = v[0]# on récupère les y
-                x_bs = torch.zeros_like(y_bs)
-                u_b = u(x_bs, y_bs, t)
-                u_target = v[1]
-                u_ts = (torch.ones_like(t)*u_target)# pareil pour avoir la forme de t sur la target
-                s+=mse(u_b, u_ts)
+        for k, val in bordure.items():
+            if k=='g': #CL : u=0
+                u_p = u(val[0], val[1], val[2])
+                u_g = torch.zeros_like(u_p)
+                s+=mse(u_p, u_g)
+            if k=='b':# CL : u=0
+                u_p = u(val[0], val[1], val[2])
+                u_b = torch.zeros_like(u_p)
+                s+=mse(u_p, u_b)
+            if k=='h':# CL : u=0
+                u_p = u(val[0], val[1], val[2])
+                u_b = torch.zeros_like(u_p)
+                s+=mse(u_p, u_b)
+            if k=='d': #CL : u=0 
+                u_p = u(val[0], val[1], val[2])
+                u_b = torch.zeros_like(u_p)
+                s+=mse(u_p, u_b)
         return s
 
     def compute_total_loss(self, u, x, y, t, bounds, a=1, b=1, c=1):
@@ -112,7 +137,7 @@ class Solver:
         self.domain = domain
         x, y, t = domain.sample_2D_training()
         self.x, self.y, self.t = x.to(device), y.to(device), t.to(device)# on travaille sur le gpu (mps)
-        self.bounds = {'x':(self.x, torch.zeros_like(self.x)), 'y':(self.y, torch.zeros_like(self.y))}
+        self.bounds = domain.generate_border()
         self.physics = physics
         self.optimizer = torch.optim.Adam(self.u.parameters(), lr=0.01)
 
@@ -127,7 +152,7 @@ class Solver:
             self.optimizer.step()
             self.losses.append(loss.item())
 
-            if epochs%20==0:
+            if epochs%100==0:
                 print(f"epoch : {epochs}, loss = {loss.item()}")
 
 
@@ -178,6 +203,9 @@ if __name__ == '__main__':
     domain = Domain(t_max=0.2)
     solver = Solver(model, domain, physics)
     solver.train(2000, solver.bounds)
+
+    path = 'pretrained/PINN_heat.pth'
+    torch.save(solver.u.state_dict(), path)
 
     #test
     domain.create_grid_testing()
