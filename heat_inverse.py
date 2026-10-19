@@ -6,6 +6,8 @@ from scipy.stats import qmc
 import numpy as np
 from heat import HeatPINN, Domain
 
+device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+
 
 class Physics:
     def __init__(self, sensor):
@@ -18,7 +20,7 @@ class Physics:
     
     def compute_data_loss(self, u):
         x_sens, y_sens, t_sens = self.sensor.record()
-        u_real = self.sensor.analytoc_sol()
+        u_real = self.sensor.analytic_sol()
         u_pred = u(x_sens, y_sens, t_sens)
         mse = nn.MSELoss()
         return mse(u_real, u_pred)
@@ -61,7 +63,7 @@ class Physics:
                 u_b = torch.zeros_like(u_p)
                 s+=mse(u_p, u_b)
             if k=='d': #CL : u=0 
-                u_p = model(val[0], val[1], val[2])
+                u_p = u(val[0], val[1], val[2])
                 u_b = torch.zeros_like(u_p)
                 s+=mse(u_p, u_b)
         return s
@@ -91,11 +93,14 @@ class Sensor:
             t_all = torch.cat((t_all, self.t), dim=0)
         return x_all, y_all, t_all # on forme les points pour faire l'inférence
     
-    def analytoc_sol(self):
+    def analytic_sol(self):
         x_sens, y_sens, t_sens = self.record()
         time = torch.exp(-2*(torch.pi)**(2)*self.real_alpha*t_sens)
         space = torch.sin(torch.pi*x_sens)*torch.sin(torch.pi*y_sens)
         return time*space
+
+    def analytoc_sol(self):
+        return self.analytic_sol()
 
 
         

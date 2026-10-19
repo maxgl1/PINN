@@ -111,7 +111,7 @@ $$ \mathcal{L} = \mathcal{L}_{init} + \mathcal{L}_{residu} + \mathcal{L}_{bord} 
 
 Les dérivées partielles sont calculées avec `torch.autograd.grad()` en utilisant `create_graph=True` pour les dérivées secondes. C'est coûteux, donc je sample les points avec Latin Hypercube pour couvrir le domaine de manière uniforme tout en restant aléatoire.
 
-J'ai utilisé principalement Adam pour l'optimisation, cependant l'équation de Navier-Stockes étant complexe, j'ai affiner le modèle grâce à l'optimiseur L-FBGS (ordre 2).
+J'ai utilisé principalement Adam pour l'optimisation, cependant l'équation de Navier-Stokes étant complexe, j'ai affiné le modèle grâce à l'optimiseur L-BFGS (ordre 2).
 
 
 ## Dépendances

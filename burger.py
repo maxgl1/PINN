@@ -6,6 +6,8 @@ from scipy.stats import qmc
 import numpy as np
 from heat import Domain
 
+device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+
 class BurgerPINN(nn.Module):# on fait hérier de nn.Module pour que pytorch gère ensuite seul et sache entre autre quel poids mettre à jour, tout les parametres du modèle seront dans self.parameters()
     def __init__(self):
         super().__init__()# on initialise la classe parente
@@ -17,7 +19,7 @@ class BurgerPINN(nn.Module):# on fait hérier de nn.Module pour que pytorch gèr
         for module in self.net[:-1]:
             u=module(u)
             u=torch.tanh(u) # fonction d'activation (valeur dans [-1, 1])
-        u=self.net[-1](u) # le dernier pas de tanh pour ne pas avoir que des valeurs bornées"""
+        u=self.net[-1](u) # le dernier pas de tanh pour ne pas avoir que des valeurs bornées
         return u # de taille (N, 1)
 
 
@@ -70,23 +72,23 @@ class Physics:
             if k=='g': #CL : u=0
                 u, v = torch.split(model(val[0], val[1], val[2]), 1, dim=1)
                 u_g = torch.zeros_like(u)
-                v_b = torch.zeros_like(v)
-                s+=mse(u, u_g) +mse(v, v_b)
+                v_g = torch.zeros_like(v)
+                s+=mse(u, u_g) + mse(v, v_g)
             if k=='b':# CL : u=0
                 u, v = torch.split(model(val[0], val[1], val[2]), 1, dim=1)
                 u_b = torch.zeros_like(u)
                 v_b = torch.zeros_like(v)
-                s+=mse(u, u_g) +mse(v, v_b)
+                s+=mse(u, u_b) + mse(v, v_b)
             if k=='h':# CL : u=0
                 u, v = torch.split(model(val[0], val[1], val[2]), 1, dim=1)
-                u_b = torch.zeros_like(u)
-                v_b = torch.zeros_like(v)
-                s+=mse(u, u_g) +mse(v, v_b)
+                u_h = torch.zeros_like(u)
+                v_h = torch.zeros_like(v)
+                s+=mse(u, u_h) + mse(v, v_h)
             if k=='d': #CL : u=0 
                 u, v = torch.split(model(val[0], val[1], val[2]), 1, dim=1)
-                u_b = torch.zeros_like(u)
-                v_b = torch.zeros_like(v)
-                s+=mse(u, u_g) +mse(v, v_b)
+                u_d = torch.zeros_like(u)
+                v_d = torch.zeros_like(v)
+                s+=mse(u, u_d) + mse(v, v_d)
         return s
 
     def compute_total_loss(self, model, x, y, t, bounds, a=1, b=1, c=1):

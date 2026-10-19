@@ -5,6 +5,8 @@ from matplotlib.widgets import Slider
 from scipy.stats import qmc
 import numpy as np
 
+device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+
 class NavierPINN(nn.Module):# on fait hérier de nn.Module pour que pytorch gère ensuite seul et sache entre autre quel poids mettre à jour, tout les parametres du modèle seront dans self.parameters()
     def __init__(self):
         super().__init__()# on initialise la classe parente
@@ -17,7 +19,7 @@ class NavierPINN(nn.Module):# on fait hérier de nn.Module pour que pytorch gèr
         for module in self.net[:-1]:
             u=module(u)
             u=torch.tanh(u) # fonction d'activation (valeur dans [-1, 1])
-        u=self.net[-1](u) # le dernier pas de tanh pour ne pas avoir que des valeurs bornées"""
+        u=self.net[-1](u) # le dernier pas de tanh pour ne pas avoir que des valeurs bornées
         return u # de taille (N, 1)
     
     def _init_weights(self, m):# m represente ici le module en cours d'initialisation
@@ -177,10 +179,7 @@ class Physics:
                 s+=mse(p, p_d)
         return s 
     
-    def compute_cycl_loss(self, model, x_cyl, y_cyl, t_collocation):#condition de vitesse nulle à la surface du cylindre
-        idx = torch.randint(0, t_collocation.shape[0], (x_cyl.shape[0],), device=device) # on pourrait penser que c'est nul car maintenant chaque point a un temps précis, mais celui ci change a chaque époque et donc est nul a plein de temps différent
-        t_rand = t_collocation[idx]# on récupère que ceux tirer dans l'étape d'avant
-
+    def compute_cycl_loss(self, model, x_cyl, y_cyl, t_rand):#condition de vitesse nulle à la surface du cylindre
         x_t, y_t, t_t  = x_cyl.reshape(-1, 1), y_cyl.reshape(-1, 1), t_rand.reshape(-1, 1)
 
         u, v, p = torch.split(model(x_t, y_t, t_t), 1, dim=1)
@@ -191,11 +190,11 @@ class Physics:
 
         return mse_ucyl + mse_vcyl
 
-    def compute_total_loss(self, model, x, y, t, bordure, x_cyl, y_cyl, t_col, a=1, b=1, c=1):
+    def compute_total_loss(self, model, x, y, t, bordure, x_cyl, y_cyl, t_rand, a=1, b=1, c=1):
         pde_x, pde_y, pde_cont = self.compute_pde_residual(model, x, y, t)
         ic = self.compute_initial_condition(model, x, y, t)
         bl = self.compute_boundary_loss(model, bordure)
-        cyl = self.compute_cycl_loss(model, x_cyl, y_cyl, t_col)
+        cyl = self.compute_cycl_loss(model, x_cyl, y_cyl, t_rand)
 
         return 1*(pde_x + pde_y + pde_cont) + 10*ic + 50*bl + 50*cyl
 
@@ -227,9 +226,9 @@ class Solver:
         self.lbfgs = torch.optim.LBFGS(
             self.model.parameters(), 
             lr=1,                       # On met souvent 1 car le line_search gère le pas
-            max_iter=500,
-            tolerance_grad=1e-15,    # Nb de sous-itérations par step
-            tolerance_change=1e-15,                
+            max_iter=1000,
+            tolerance_grad=1e-9,    # Nb de sous-itérations par step
+            tolerance_change=1e-11,                
             history_size=50,            # Mémoire des gradients passés
             line_search_fn="strong_wolfe") # INDISPENSABLE pour la stabilité en PINNs
         
@@ -238,7 +237,9 @@ class Solver:
             self.optimizer.zero_grad() # toujours reinitialiser pour éviter accumulation du gradient
             #x_gpu, y_gpu, t_gpu = self.x.to(device), self.y.to(device), self.t.to(device)
             # u_pred = self.u(x_gpu, y_gpu, t_gpu)
-            loss = self.physics.compute_total_loss(self.model, self.x, self.y, self.t, self.bordure, self.x_cyl, self.y_cyl, self.t_collocation)# calcul de la loss (optimisable car on rentre dedans le modèle et pas l'inférence donc on recalule plusieurs fois les memes choses)
+            idx = torch.randint(0, self.t_collocation.shape[0], (self.x_cyl.shape[0],), device=device) # on pourrait penser que c'est nul car maintenant chaque point a un temps précis, mais celui ci change a chaque époque et donc est nul a plein de temps différent
+            t_rand = self.t_collocation[idx]# on récupère que ceux tirer dans l'étape d'avant et on le fait pas dans la loss pour que ensuite quand on utilise fbgs on puisse fixer notre grille
+            loss = self.physics.compute_total_loss(self.model, self.x, self.y, self.t, self.bordure, self.x_cyl, self.y_cyl, t_rand)# calcul de la loss (optimisable car on rentre dedans le modèle et pas l'inférence donc on recalule plusieurs fois les memes choses)
             loss.backward()
 
             self.optimizer.step()
@@ -248,13 +249,14 @@ class Solver:
                 print(f"epoch : {epochs}, loss = {loss.item():3f}, LR = {current_lr:3e}")
         
         # affinage du modèle (Closure)
-
+        idx = torch.randint(0, self.t_collocation.shape[0], (self.x_cyl.shape[0],), device=device)
+        t_cyl_fixed = self.t_collocation[idx]
         def closure():
             self.lbfgs.zero_grad()
             # On recalcule la perte totale (PDE + BC + IC)
-            loss = physics.compute_total_loss(self.model, self.x, self.y, self.t, self.bordure, self.x_cyl, self.y_cyl, self.t_collocation) 
+            loss = physics.compute_total_loss(self.model, self.x, self.y, self.t, self.bordure, self.x_cyl, self.y_cyl, t_cyl_fixed) 
             loss.backward()
-            if self.iter_count % 10 == 0:
+            if self.iter_count % 50 == 0:
                 print(f"L-BFGS Iter: {self.iter_count} | Loss: {loss.item():.6e}")
             self.iter_count += 1
             return loss
@@ -269,7 +271,7 @@ def convert_tensor_to_array(tensor):
     array = tensor.squeeze().detach().numpy()
     return array
 
-def plot_w_slider_2d(arr_y, domain, str):
+def plot_w_slider_2d(arr_y, domain, str, normalized=True):
     # 1. Récupération des dimensions
     nx = len(np.unique(domain.x_grid.detach().numpy()))# en gros la on retrouve le nombre d'itérations qu'on a fait
     ny = len(np.unique(domain.y_grid.detach().numpy()))
@@ -284,9 +286,12 @@ def plot_w_slider_2d(arr_y, domain, str):
     
     # 3. Affichage de l'état initial (t=0)
     # On affiche la tranche [:, :, 0]
-    im = ax.imshow(evolution[:, :, 0].T, extent=[domain.x_min, domain.x_max, domain.y_min, domain.y_max]
+    if normalized:
+        im = ax.imshow(evolution[:, :, 0].T, extent=[domain.x_min, domain.x_max, domain.y_min, domain.y_max]
                    , origin='lower', cmap='hot', aspect='auto', vmin=0.0, vmax=1.0)
-    
+    if not normalized:
+        im = ax.imshow(evolution[:, :, 0].T, extent=[domain.x_min, domain.x_max, domain.y_min, domain.y_max]
+                   , origin='lower', cmap='hot', aspect='auto')
     ax.set_xlabel('x')
     ax.set_ylabel('y')
     fig.colorbar(im, ax=ax, label=f'vitesse {str}(x, y)')
@@ -311,7 +316,7 @@ if __name__ == '__main__':
     #train
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Calculs effectués sur : {device}")
-    domain = Domain(n=40000, t_max=1)
+    domain = Domain(n=40000, t_max=4)
     domain.sample_2D_training()
     domain.exclude_collocation_cylinder(torch.tensor(0.5), torch.tensor(0.5), torch.tensor(0.1))
     model = NavierPINN().to(device) # calculs sur le gpu

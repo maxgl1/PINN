@@ -5,6 +5,8 @@ from matplotlib.widgets import Slider
 from scipy.stats import qmc
 import numpy as np
 
+device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+
 class HeatPINN(nn.Module):# on fait hérier de nn.Module pour que pytorch gère ensuite seul et sache entre autre quel poids mettre à jour, tout les parametres du modèle seront dans self.parameters()
     def __init__(self):
         super().__init__()# on initialise la classe parente
@@ -16,7 +18,7 @@ class HeatPINN(nn.Module):# on fait hérier de nn.Module pour que pytorch gère 
         for module in self.net[:-1]:
             u=module(u)
             u=torch.tanh(u) # fonction d'activation (valeur dans [-1, 1])
-        u=self.net[-1](u) # le dernier pas de tanh pour ne pas avoir que des valeurs bornées"""
+        u=self.net[-1](u) # le dernier pas de tanh pour ne pas avoir que des valeurs bornées
         return u # de taille (N, 1)
 
 class Domain:
